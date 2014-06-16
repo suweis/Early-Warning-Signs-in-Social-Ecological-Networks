@@ -1,0 +1,690 @@
+(*This is the main code I develop in order to analyze Early Warning in Social-Ecological Networks. The code is in Mathematica, so you have to copy and past the following code in a .nb notebook. If you use this or part of the code, please cite the corresponding paper.*)
+
+
+
+(*Introduction*)
+
+(*The dynamics we have in mind is of the Lotka-Volterra where S species interact wiht each other thorugh an interaction matrix M. \[Alpha] gives the growth rate, while the constant matric B describe the environmental noise.*) 
+
+\[DifferentialD]x(t) == \[Alpha] x(t) \[DifferentialD]t - 
+  M x^2(t) \[DifferentialD]t + B \[DifferentialD]W(t),
+
+(*The linearized system of the LV multidimensional model is the multivariate Ornstein - Uhlenbeck Process  where A and B are 2x 2 constant matrices, while W is the Wiener Process of mean 0 and variance \[Sigma]^2. For now, we are not interested in the relation between \[Alpha], M and A.*)
+
+\[DifferentialD]x(t) == A x(t) \[DifferentialD]t - B \[DifferentialD]W(t),
+
+(*The general relation between A,B and the stationary coviariance matrix is*)
+
+f[A_List, B_List, \[Sigma]Mat_List] := -A.\[Sigma]Mat + \
+\[Sigma]Mat.(-Transpose[A]) - B Transpose[B];
+
+
+
+sol\[Sigma][A_, B_, n_] := 
+ Module[{\[Sigma]Mat = Array[Subscript[\[Sigma], ##] &, {n, n}], sol}, 
+  sol = NSolve[f[A, B, \[Sigma]Mat] == ConstantArray[0., {n, n}], 
+    Flatten[\[Sigma]Mat]]; Return[\[Sigma]Mat /. sol[[1]]]]
+
+(*Upload Functions to build networks with different Archtiectures*)
+
+BBA[a_List, p_] := 
+ Module[{Sx = Dimensions[a][[1]], Sy = Dimensions[a][[2]]}, 
+  ReplacePart[
+   Join[Join[Table[If[RandomReal[] < p, -1, 0], {i, 1, Sx}, {j, 1, Sx}], a, 2],
+    Join[a // Transpose, 
+     Table[If[RandomReal[] < p, -1, 0], {i, 1, Sy}, {j, 1, Sy}], 2]], {l_, 
+     l_} -> -1]]
+BBAnS[a_List, p_] := 
+ Module[{Sx = Dimensions[a][[1]], Sy = Dimensions[a][[2]]}, 
+  ReplacePart[
+   Join[Join[Table[If[RandomReal[] < p, -1, 0], {i, 1, Sx}, {j, 1, Sx}], a, 2],
+    Join[a, Table[If[RandomReal[] < p, -1, 0], {i, 1, Sy}, {j, 1, Sy}], 
+     2]], {l_, l_} -> -1]]
+ht[i_, j_, c_] := If[i <= j, If[RandomReal[] < c, 1, 0], 0]
+aN[n_, c_] := Reverse[Table[ht[i, j, c], {j, 1, n}, {i, 1, n}]]
+randomization[Q_] := 
+  Partition[Nest[RandomSample, Flatten[Q], 2], Dimensions[Q][[2]]];
+W[\[Sigma]_, n_, c_, r_, \[CapitalOmega]_] := 
+ Module[{aa = aN[n, c], \[CapitalSigma]AP = 
+    Table[Abs[RandomVariate[NormalDistribution[0, \[Sigma]]]], {i, 2 n}, {j, 
+      2 n}], \[CapitalSigma]PA = 
+    Table[Abs[RandomVariate[NormalDistribution[0, \[Sigma]]]], {i, 2 n}, {j, 
+      2 n}]}, If[r == 1, 
+   ReplacePart[BBA[aa, \[CapitalOmega]] \[CapitalSigma]AP, {l_, l_} -> -1], 
+   ReplacePart[
+    BBA[randomization[aa], \[CapitalOmega]] \[CapitalSigma]PA, {l_, 
+      l_} -> -1]]]
+
+W0[\[Sigma]_, n_, c_, r_, \[CapitalOmega]_] := 
+ Module[{aa = aN[n, c], \[CapitalSigma]AP = 
+    Table[\[Sigma], {i, 2 n}, {j, 2 n}], \[CapitalSigma]PA = 
+    Table[\[Sigma], {i, 2 n}, {j, 2 n}]}, 
+  If[r == 1, 
+   ReplacePart[BBA[aa, \[CapitalOmega]] \[CapitalSigma]AP, {l_, l_} -> -1], 
+   ReplacePart[
+    BBA[randomization[aa], \[CapitalOmega]] \[CapitalSigma]PA, {l_, 
+      l_} -> -1]]]
+
+W1[\[Sigma]_, n_, c_, r_, \[CapitalOmega]_] := 
+ Module[{aa = aN[n, c], \[CapitalSigma]AP = 
+    Table[RandomVariate[NormalDistribution[\[Sigma], 0.1 \[Sigma]]], {i, 
+      2 n}, {j, 2 n}], \[CapitalSigma]PA = 
+    Table[RandomVariate[NormalDistribution[\[Sigma], 0.1 \[Sigma]]], {i, 
+      2 n}, {j, 2 n}]}, 
+  If[r == 1, 
+   ReplacePart[BBA[aa, \[CapitalOmega]] \[CapitalSigma]AP, {l_, l_} -> -1], 
+   ReplacePart[
+    BBA[randomization[aa], \[CapitalOmega]] \[CapitalSigma]PA, {l_, 
+      l_} -> -1]]]
+
+b0[B_, n_] := B IdentityMatrix[n];
+
+(*N Dimensional Linearized Case MEAN FIELD*)
+
+(*Random Case (May - Not Symmetric)
+
+aran[\[Sigma]_, n_, c_] := 
+ ReplacePart[
+  Table[If[RandomReal[] < c, RandomChoice[{\[Sigma], -\[Sigma]}], 0], {i, 1, 
+    n}, {j, 1, n}], {i_, i_} -> -1]
+
+posMaxVarPosition[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c]}, cov = sol\[Sigma][A, b0[1, n], n]; 
+  Position[Flatten[cov], Max[Flatten[cov]]]]
+
+\[Lambda]\[Sigma]ran[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+(*Predator Prey*)
+
+aPP[\[Sigma]_, n_, c_] := 
+ Module[{l = 
+    Flatten[Rest[Map[Most, Table[{j, i}, {i, 1, n}, {j, 1, i}]]], 1]}, 
+  q = DiagonalMatrix[ConstantArray[-1, n]];
+  If[RandomReal[] < c, 
+     If[RandomReal[] <= 0.5, q[[#[[1]], #[[2]]]] = \[Sigma]; 
+      q[[#[[2]], #[[1]]]] = -\[Sigma], q[[#[[1]], #[[2]]]] = -\[Sigma]; 
+      q[[#[[2]], #[[1]]]] = \[Sigma]], q[[#[[1]], #[[2]]]] = 0] & /@ l; 
+  Return[q]]
+
+\[Lambda]\[Sigma]PP[\[Sigma]_, n_, c_] := 
+ Module[{A = aPP[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+\[Lambda]\[Sigma]PP2[\[Sigma]_, n_, c_] := 
+ Module[{A = aPP[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], RandomChoice[Flatten[cov]]}]]
+
+(*ListPlot[Mean[Table[Sort[Table[\[Lambda]\[Sigma]PP[\[Sigma],20,0.2],{\
+\[Sigma],0.05,1.5,0.125}]],{10}]],AxesLabel->{"\[Lambda]","Subscript[\[Sigma],\
+ x]^2"},AxesOrigin->Automatic,PlotRange->All,Joined->True,Mesh->True,\
+MeshStyle->Directive[PointSize[Medium],Red]]*)
+
+(*Cascade Predator Prey Model*)
+
+aPPCas[\[Sigma]_, n_, c_] := 
+ Module[{lp = 
+    Flatten[Rest[Map[Most, Table[{i, j}, {i, 1, n}, {j, 1, i}]]], 1]}, 
+  qC = DiagonalMatrix[ConstantArray[-1, n]];
+  If[RandomReal[] < c, qC[[#[[1]], #[[2]]]] = \[Sigma]; 
+     qC[[#[[2]], #[[1]]]] = -\[Sigma]] & /@ lp; Return[qC]]
+
+\[Lambda]\[Sigma]PPCas[\[Sigma]_, n_, c_] := 
+ Module[{A = aPPCas[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+\[Lambda]\[Sigma]PPCas2[\[Sigma]_, n_, c_] := 
+ Module[{A = aPPCas[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], RandomChoice[Flatten[cov]]}]]
+
+(*ListPlot[Mean[Table[Sort[Table[\[Lambda]\[Sigma]PPCas[\[Sigma],20,0.2],{\
+\[Sigma],0.05,1.5,0.125}]],{10}]],AxesLabel->{"\[Lambda]","Subscript[\[Sigma],\
+ x]^2"},AxesOrigin->Automatic,PlotRange->All,Joined->True,Mesh->True,\
+MeshStyle->Directive[PointSize[Medium],Red]]*)
+
+(*Modular Predator Prey Model*)
+
+Mmod[S_, Sb_] := 
+ ReplacePart[
+  Total[Table[
+    SparseArray[
+     Band[{1 + (Sb)*(i - 1), 1 + (Sb)*(i - 1)}] -> 
+      ConstantArray[1, {Sb, Sb}], {S, S}], {i, 1, 
+     Floor[Solve[Sb + x*(Sb) == S, x][[1, 1, 2]]] + 1}]], {l_, l_} -> -1]
+
+aMod[\[Sigma]_, n_, c_] := Module[{l}, q = Normal[Mmod[n, 4]];
+  l = Select[Position[q, 1], #[[1]] < #[[2]] &];
+  If[RandomReal[] < c, 
+     If[RandomReal[] <= 0.5, q[[#[[1]], #[[2]]]] = \[Sigma]; 
+      q[[#[[2]], #[[1]]]] = -\[Sigma], q[[#[[1]], #[[2]]]] = -\[Sigma]; 
+      q[[#[[2]], #[[1]]]] = \[Sigma]], q[[#[[1]], #[[2]]]] = 0] & /@ l; 
+  Return[q]]
+
+\[Lambda]\[Sigma]Mod[\[Sigma]_, n_, c_] := 
+ Module[{A = aMod[\[Sigma], n, c] // Normal, cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+(*Mutualistic (Symmetric only binary adjcency matrix) *)
+
+aM[\[Sigma]_, n_, c_] := 
+ Module[{l = 
+    Flatten[Rest[Map[Most, Table[{j, i}, {i, 1, n}, {j, 1, i}]]], 1]}, 
+  qM = DiagonalMatrix[ConstantArray[-1, n]];
+  If[RandomReal[] < c, qM[[#[[1]], #[[2]]]] = \[Sigma]; 
+     qM[[#[[2]], #[[1]]]] = \[Sigma], qM[[#[[1]], #[[2]]]] = 0] & /@ l; 
+  Return[qM]]
+
+\[Lambda]\[Sigma]M[\[Sigma]_, n_, c_] := 
+ Module[{A = aM[\[Sigma], n, c], cov, pos}, cov = sol\[Sigma][A, b0[1, n], n];
+   pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+(*ListPlot[Mean[Table[Sort[Table[\[Lambda]\[Sigma]M[\[Sigma],20,0.2],{\[Sigma]\
+,0.05,0.235,0.0125}]],{10}]],AxesLabel->{"\[Lambda]","Subscript[\[Sigma], \
+x]^2"},AxesOrigin->Automatic,PlotRange->All,Joined->True,Mesh->True,MeshStyle-\
+>Directive[PointSize[Medium],Red]]*)
+
+(*Mutualistic with Competition*)
+
+aMC[\[Sigma]_, n_, c_] := 
+ Module[{lmc = 
+    Flatten[Rest[Map[Most, Table[{j, i}, {i, 1, n}, {j, 1, i}]]], 1]}, 
+  qMC = DiagonalMatrix[ConstantArray[-1, n]];
+  If[RandomReal[] < c, 
+     If[RandomReal[] <= 0.5, qMC[[#[[1]], #[[2]]]] = \[Sigma]; 
+      qMC[[#[[2]], #[[1]]]] = \[Sigma], qMC[[#[[1]], #[[2]]]] = -\[Sigma]; 
+      qMC[[#[[2]], #[[1]]]] = -\[Sigma]], qMC[[#[[1]], #[[2]]]] = 0] & /@ lmc;
+   Return[qMC]]
+
+\[Lambda]\[Sigma]MC[\[Sigma]_, n_, c_] := 
+ Module[{A = aMC[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+(*Mutualistic Bipartite Not Nested and without Competition*)
+
+\[Lambda]\[Sigma]MB[\[Sigma]_, n_, c_] := 
+ Module[{A = W0[\[Sigma], n/2, c, 0, 0], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+(*ListPlot[Mean[Table[Sort[Table[\[Lambda]\[Sigma]MB[\[Sigma],20,0.4],{\
+\[Sigma],0.05,0.235,0.0125}]],{10}]],AxesLabel->{"\[Lambda]","Subscript[\
+\[Sigma], x]^2"},AxesOrigin->Automatic,PlotRange->All,Joined->True,Mesh->True,\
+MeshStyle->Directive[PointSize[Medium],Red]]*)
+
+(*Mutualistic Bipartite Nested and without Competition*)
+
+\[Lambda]\[Sigma]MBN[\[Sigma]_, n_, c_] := 
+ Module[{A = W0[\[Sigma], n/2, c, 1, 0], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+(*Mutualistic Bipartite and with Competition*)
+
+\[Lambda]\[Sigma]MBNC[\[Sigma]_, n_, c_] := 
+ Module[{A = W0[\[Sigma], n/2, c, 1, c/2], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+(*Modular Mutualistic Network*)
+
+aModM[\[Sigma]_, n_, c_, p_] := Module[{l}, q = Normal[Mmod[n, p]];
+  l = Select[Position[q, 1], #[[1]] < #[[2]] &];
+  If[RandomReal[] < c, 
+     If[RandomReal[] <= 0.5, q[[#[[1]], #[[2]]]] = \[Sigma]; 
+      q[[#[[2]], #[[1]]]] = \[Sigma], q[[#[[1]], #[[2]]]] = \[Sigma]; 
+      q[[#[[2]], #[[1]]]] = \[Sigma]], q[[#[[1]], #[[2]]]] = 0; 
+     q[[#[[2]], #[[1]]]] = 0] & /@ l; Return[q]]
+
+\[Lambda]\[Sigma]ModM[\[Sigma]_, n_, c_, p_] := 
+ Module[{A = aModM[\[Sigma], n, c] // Normal, cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  pos = Position[Flatten[cov], Max[Flatten[cov]]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[Flatten[cov], pos[[1]]][[1]]}]]
+
+(*Social (Small World, barabasi Albert)*)
+
+BA[\[Sigma]_, n_, p_] := 
+ ReplacePart[
+  AdjacencyMatrix[
+    RandomGraph[
+     BarabasiAlbertGraphDistribution[n, p]]] ConstantArray[\[Sigma], {n, 
+     n}], {i_, i_} -> -1]
+
+SW[\[Sigma]_, n_, c_, p_] := 
+ ReplacePart[
+  AdjacencyMatrix[
+    RandomGraph[
+     WattsStrogatzGraphDistribution[n, c, p]]] ConstantArray[\[Sigma], {n, 
+     n}], {i_, i_} -> -1]
+
+\[Lambda]\[Sigma]SW[\[Sigma]_, n_, c_, p_] := 
+ Module[{A = SW[\[Sigma], n, c, p], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Max[Flatten[cov]]}]]
+
+\[Lambda]\[Sigma]SW0[\[Sigma]_, n_, c_, p_] := 
+ Module[{A = SW[\[Sigma], n, c, p], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Max[Flatten[cov]] - Min[Flatten[cov]]}]]
+
+\[Lambda]\[Sigma]SW1[\[Sigma]_, n_, c_, p_] := 
+ Module[{A = SW[\[Sigma], n, c, p], cov, pos, g, ev}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  g = AdjacencyGraph[Boole[Positive[Abs[A]]]]; ev = EigenvectorCentrality[g]; 
+  pos = Position[ev, Max[ev]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]SW2[\[Sigma]_, n_, c_, p_] := 
+ Module[{A = SW[\[Sigma], n, c, p], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; k = Total[Boole[Positive[Abs[A]]]]; 
+  pos = Position[k, Max[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]SW3[\[Sigma]_, n_, c_, p_] := 
+ Module[{A = SW[\[Sigma], n, c, p], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; k = Total[Boole[Positive[Abs[A]]]]; 
+  pos = Position[k, Min[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[cov, pos][[1, pos]][[1]]}]]
+
+(*Role of single node*)
+
+\[Lambda]\[Sigma]ran0[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Max[Flatten[cov]] - Min[Flatten[cov]]}]]
+
+\[Lambda]\[Sigma]ran1[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c], cov, pos, g, ev}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  g = AdjacencyGraph[Boole[Positive[Abs[A]]]]; ev = EigenvectorCentrality[g]; 
+  pos = Position[ev, Max[ev]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]ran2[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; k = Total[Boole[Positive[Abs[A]]]]; 
+  pos = Position[k, Max[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]ran3[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; k = Total[Boole[Positive[Abs[A]]]]; 
+  pos = Position[k, Min[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[cov, pos][[1, pos]][[1]]}]]
+
+indransC = {ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran[\[Sigma], 10, 0.5], {\[Sigma], 
+       0.05, 0.45, 0.025}]], {1000}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran0[\[Sigma], 10, 0.5], {\[Sigma], 
+       0.05, 0.45, 0.025}]], {1000}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran1[\[Sigma], 10, 0.5], {\[Sigma], 
+       0.05, 0.45, 0.025}]], {1000}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran2[\[Sigma], 10, 0.5], {\[Sigma], 
+       0.05, 0.45, 0.025}]], {1000}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran3[\[Sigma], 10, 0.5], {\[Sigma], 
+       0.05, 0.45, 0.025}]], {1000}]};
+       
+       indranSc = {ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran[\[Sigma], 50, 0.1], {\[Sigma], 
+       0.1, 0.425, 0.025}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran0[\[Sigma], 50, 0.1], {\[Sigma], 
+       0.1, 0.425, 0.025}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran1[\[Sigma], 50, 0.1], {\[Sigma], 
+       0.1, 0.425, 0.025}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran2[\[Sigma], 50, 0.1], {\[Sigma], 
+       0.1, 0.425, 0.025}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]ran3[\[Sigma], 50, 0.1], {\[Sigma], 
+       0.1, 0.425, 0.025}]], {100}]};
+       
+       \[Mu]indransC = Map[Mean, indransC];
+       
+       \[Mu]indranSc = Map[Mean, indranSc];
+       
+       \[Lambda]\[Sigma]M0[\[Sigma]_, n_, c_] := 
+ Module[{A = aM[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Max[Flatten[cov]] - Min[Flatten[cov]]}]]
+
+\[Lambda]\[Sigma]M1[\[Sigma]_, n_, c_] := 
+ Module[{A = aM[\[Sigma], n, c], cov, pos, g, ev}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  g = AdjacencyGraph[Boole[Positive[Abs[A]]]]; 
+  ev = EigenvectorCentrality[g]; pos = Position[ev, Max[ev]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]M2[\[Sigma]_, n_, c_] := 
+ Module[{A = aM[\[Sigma], n, c], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  k = Total[Boole[Positive[Abs[A]]]]; pos = Position[k, Max[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]M3[\[Sigma]_, n_, c_] := 
+ Module[{A = aM[\[Sigma], n, c], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  k = Total[Boole[Positive[Abs[A]]]]; pos = Position[k, Min[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Part[cov, pos][[1, pos]][[1]]}]]
+
+indMsC = {ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]M[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.01, 0.19, 0.02}]], {100}] // Mean, 
+   ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]M0[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.01, 0.19, 0.02}]], {100}] // Mean, 
+   ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]M1[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.01, 0.19, 0.02}]], {100}] // Mean, 
+   ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]M2[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.01, 0.19, 0.02}]], {100}] // Mean, 
+   ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]M3[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.01, 0.19, 0.02}]], {100}] // Mean};
+        
+        \[Lambda]\[Sigma]MC0[\[Sigma]_, n_, c_] := 
+ Module[{A = W0[\[Sigma], n/2, c, 1, c/2], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Max[Flatten[cov]] - Min[Flatten[cov]]}]]
+
+\[Lambda]\[Sigma]MC1[\[Sigma]_, n_, c_] := 
+ Module[{A = W0[\[Sigma], n/2, c, 1, c/2], cov, pos, g, ev}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  g = AdjacencyGraph[Boole[Positive[Abs[A]]]]; 
+  ev = EigenvectorCentrality[g]; pos = Position[ev, Max[ev]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]MC2[\[Sigma]_, n_, c_] := 
+ Module[{A = W0[\[Sigma], n/2, c, 1, c/2], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  k = Total[Boole[Positive[Abs[A]]]]; pos = Position[k, Max[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]MC3[\[Sigma]_, n_, c_] := 
+ Module[{A = W0[\[Sigma], n/2, c, 1, c/2], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  k = Total[Boole[Positive[Abs[A]]]]; pos = Position[k, Min[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Part[cov, pos][[1, pos]][[1]]}]]
+
+indMC = {ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]MBNC[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.3, 0.39, 0.0125}]], {100}] // Mean, 
+   ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]MC0[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.3, 0.39, 0.0125}]], {100}] // Mean, 
+   ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]MC1[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.3, 0.39, 0.0125}]], {100}] // Mean, 
+   ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]MC2[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.3, 0.39, 0.0125}]], {100}] // Mean, 
+   ParallelTable[
+     Sort[Table[\[Lambda]\[Sigma]MC3[\[Sigma], 20, 0.2], {\[Sigma], 
+        0.3, 0.39, 0.0125}]], {100}] // Mean};
+        
+        indSWsc = {ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW[\[Sigma], 20, 0.5, 2], {\[Sigma], 
+       0.05, 0.26, 0.03}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW0[\[Sigma], 20, 0.5, 2], {\[Sigma], 
+       0.05, 0.26, 0.03}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW1[\[Sigma], 20, 0.5, 2], {\[Sigma], 
+       0.05, 0.26, 0.03}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW2[\[Sigma], 20, 0.5, 2], {\[Sigma], 
+       0.05, 0.26, 0.03}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW3[\[Sigma], 20, 0.5, 2], {\[Sigma], 
+       0.05, 0.26, 0.03}]], {100}]};
+       
+       indSWSc2 = {ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW[\[Sigma], 50, 0.5, 3], {\[Sigma], 
+       0.05, 0.15, 0.025}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW0[\[Sigma], 50, 0.5, 3], {\[Sigma], 
+       0.05, 0.15, 0.025}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW1[\[Sigma], 50, 0.5, 3], {\[Sigma], 
+       0.05, 0.15, 0.025}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW2[\[Sigma], 50, 0.5, 3], {\[Sigma], 
+       0.05, 0.15, 0.025}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]SW3[\[Sigma], 50, 0.5, 3], {\[Sigma], 
+       0.05, 0.15, 0.025}]], {100}]};
+       
+       \[Lambda]\[Sigma]BA[\[Sigma]_, n_, c_] := 
+ Module[{A = BA[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Max[Flatten[cov]]}]]
+
+\[Lambda]\[Sigma]BA0[\[Sigma]_, n_, c_] := 
+ Module[{A = BA[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Max[Flatten[cov]] - Min[Flatten[cov]]}]]
+
+\[Lambda]\[Sigma]BA1[\[Sigma]_, n_, c_] := 
+ Module[{A = BA[\[Sigma], n, c], cov, pos, g, ev}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  g = AdjacencyGraph[Boole[Positive[Abs[A]]]]; 
+  ev = EigenvectorCentrality[g]; pos = Position[ev, Max[ev]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]BA2[\[Sigma]_, n_, c_] := 
+ Module[{A = BA[\[Sigma], n, c], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  k = Total[Boole[Positive[Abs[A]]]]; pos = Position[k, Max[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]BA3[\[Sigma]_, n_, c_] := 
+ Module[{A = BA[\[Sigma], n, c], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  k = Total[Boole[Positive[Abs[A]]]]; pos = Position[k, Min[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], 
+    Part[cov, pos][[1, pos]][[1]]}]]
+
+indBAsC = {ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA[\[Sigma], 10, 3], {\[Sigma], 0.05, 
+       0.175, 0.025}]], {1000}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA0[\[Sigma], 10, 3], {\[Sigma], 0.05,
+        0.175, 0.025}]], {1000}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA1[\[Sigma], 10, 3], {\[Sigma], 0.05,
+        0.175, 0.025}]], {1000}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA2[\[Sigma], 10, 3], {\[Sigma], 0.05,
+        0.175, 0.025}]], {1000}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA3[\[Sigma], 10, 3], {\[Sigma], 0.05,
+        0.175, 0.025}]], {1000}]};
+        
+        indBASc = {ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA[\[Sigma], 50, 3], {\[Sigma], 0.015,
+        0.115, 0.02}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA0[\[Sigma], 50, 3], {\[Sigma], 
+       0.015, 0.115, 0.02}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA1[\[Sigma], 50, 3], {\[Sigma], 
+       0.015, 0.115, 0.02}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA2[\[Sigma], 50, 3], {\[Sigma], 
+       0.015, 0.115, 0.02}]], {100}], 
+   ParallelTable[
+    Sort[Table[\[Lambda]\[Sigma]BA3[\[Sigma], 50, 3], {\[Sigma], 
+       0.015, 0.115, 0.02}]], {100}]};
+       
+       KposMaxVarPosition[x_, n_] := 
+ Module[{A , k, cov, kmax, kmin, kloc}, A = ToExpression[x]; 
+  k = Total[Boole[Positive[Abs[A]]]]; 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  kloc = Part[k, Position[cov, Max[Flatten[cov]]][[1, 1]]]; 
+  kmin = Min[k]; kmax = Max[k]; Return[{k, kloc}]]
+
+kstat = {ParallelTable[
+    KposMaxVarPosition[aran[0.45, 10, 0.5], 10], {1000}], 
+   ParallelTable[
+    KposMaxVarPosition[SW[0.15, 10, 0.5, 3], 10], {1000}], 
+   ParallelTable[
+    KposMaxVarPosition[aModM[0.28, 10, 0.75, 5], 10], {1000}], 
+   ParallelTable[KposMaxVarPosition[BA[0.175, 10, 3], 10], {1000}], 
+   ParallelTable[
+    KposMaxVarPosition[W0[0.45, 5, 1, 1, 0.5], 10], {1000}], 
+   ParallelTable[
+    KposMaxVarPosition[W0[0.25, 5, 1, 1, 0.1], 10], {1000}]};
+    
+    
+(*N Dimensional Linearized Case With STRONG Disorder -  Here I provide an example to show how to generalize the above code for the case of strong disorder, i.e. not mean field case. If you need clarifications contact me @SamirSuweis*)
+
+(*Random Case (May - Not Symmetric)*)
+
+aran[\[Sigma]_, n_, c_] := 
+ ReplacePart[
+  Table[If[RandomReal[] < c, RandomVariate[NormalDistribution[0, \[Sigma]]], 
+    0], {i, 1, n}, {j, 1, n}], {i_, i_} -> -1]
+
+b0[B_, n_] := B IdentityMatrix[n];
+
+posMaxVarPosition[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c]}, cov = sol\[Sigma][A, b0[1, n], n]; 
+  Position[Flatten[cov], Max[Flatten[cov]]]]
+
+\[Lambda]\[Sigma]ran[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c], cov, pos}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Max[Flatten[cov]]}]]
+
+\[Lambda]\[Sigma]ran1[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c], cov, pos, g, ev}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; 
+  g = AdjacencyGraph[Boole[Positive[Abs[A]]]]; ev = EigenvectorCentrality[g]; 
+  pos = Position[ev, Max[ev]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]ran2[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; k = Total[Boole[Positive[Abs[A]]]]; 
+  pos = Position[k, Max[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[cov, pos][[1, pos]][[1]]}]]
+
+\[Lambda]\[Sigma]ran3[\[Sigma]_, n_, c_] := 
+ Module[{A = aran[\[Sigma], n, c], cov, pos, k}, 
+  cov = sol\[Sigma][A, b0[1, n], n]; k = Total[Boole[Positive[Abs[A]]]]; 
+  pos = Position[k, Min[k]][[1]]; 
+  Return[{Max[Map[Re, Eigenvalues[A]]], Part[cov, pos][[1, pos]][[1]]}]]
+  
+  
+(*Threshold Analysis -System  Collapse Detectability *)
+
+(*MEAN FIELD*)
+
+all\[Sigma]NoDis1000 = Import["all\[Sigma]NoDisFine1000.m"];
+
+colors = {Gray, Red, Brown, Orange, Purple, Green, CMYKColor[0.3, 1, 0, .25], 
+   CMYKColor[0, 1, 0, 0]};
+cases = {"Random", "Mutualisitc", "Modular", "Bipartite", "Nested", 
+  "Nested with Competition", "Barabasi-Albert", "Small World"}
+
+
+K\[Tau][{x1_List, x2_List}] := 
+ If[Length[x1] > 1, KendallTauTest[x1, x2, "HypothesisTestData"]]
+
+all\[Sigma]NoDisTestB[i_, r_, \[Lambda]_] := 
+ Module[{x1x2 = 
+    Transpose[
+     Cases[all\[Sigma]NoDis1000[[i]][[r]], {_?(# <= -\[Lambda] &), _}]]}, 
+  Return[{x1x2[[1]], x1x2[[2]]}]]
+all\[Sigma]NoDisStatB[i_, \[Lambda]_] := 
+ ParallelTable[
+  K\[Tau][all\[Sigma]NoDisTestB[i, r, \[Lambda]]]["TestData"], {r, 1, 1000}]
+
+
+
+
+
+\[Lambda]all\[Sigma]NoDisStat1 = 
+  Cases[all\[Sigma]NoDisStatB[1, 0.2], {_?(# >= 0.5 &), _?(# < 0.05 &)}] // 
+   N;
+\[Lambda]all\[Sigma]NoDisStat2 = 
+  Cases[all\[Sigma]NoDisStatB[2, 0.2], {_?(# >= 0.5 &), _?(# < 0.05 &)}] // 
+   N;
+\[Lambda]all\[Sigma]NoDisStat4 = 
+  Cases[all\[Sigma]NoDisStatB[4, 0.2], {_?(# >= 0.5 &), _?(# < 0.05 &)}] // 
+   N;
+\[Lambda]all\[Sigma]NoDisStat5 = 
+  Cases[all\[Sigma]NoDisStatB[5, 0.2], {_?(# >= 0.5 &), _?(# < 0.05 &)}] // 
+   N;
+\[Lambda]all\[Sigma]NoDisStat6 = 
+  Cases[all\[Sigma]NoDisStatB[6, 0.2], {_?(# >= 0.5 &), _?(# < 0.05 &)}] // 
+   N;
+\[Lambda]all\[Sigma]NoDisStat7 = 
+  Cases[all\[Sigma]NoDisStatB[7, 0.2], {_?(# >= 0.5 &), _?(# < 0.05 &)}] // 
+   N;
+\[Lambda]all\[Sigma]NoDisStat8 = 
+  Cases[all\[Sigma]NoDisStatB[8, 0.2], {_?(# >= 0.5 &), _?(# < 0.05 &)}] // N;
+  
+  
+  GraphicsGrid[
+ Partition[
+  Table[Histogram[
+    Transpose[
+      ToExpression[
+       ToString[\[Lambda]all\[Sigma]NoDisStat] <> ToString[i]]][[1]], 
+    Automatic, "PDF", PlotLabel -> cases[[i]], Frame -> True, 
+    FrameLabel -> {Text[
+       Style["Kendall\[Tau]", Italic, 14, FontFamily -> "Helvetica"]],
+       Text[Style["PDF", 14, FontFamily -> "Helvetica"]]}, 
+    ChartStyle -> colors[[i]]], {i, {1, 2, 4, 5, 6, 7, 8, 9}}], 2]]
+    
+  
+  BarChart[{Length[\[Lambda]all\[Sigma]NoDisStat1]/1000, 
+  Length[\[Lambda]all\[Sigma]NoDisStat2]/1000, 
+  Length[\[Lambda]all\[Sigma]NoDisStat4]/1000, 
+  Length[\[Lambda]all\[Sigma]NoDisStat5]/1000, 
+  Length[\[Lambda]all\[Sigma]NoDisStat6]/1000, 
+  Length[\[Lambda]all\[Sigma]NoDisStat7]/1000, 
+  Length[\[Lambda]all\[Sigma]NoDisStat8]/1000}, 
+ ChartBaseStyle -> EdgeForm[Dashed], 
+ ChartLabels -> 
+  Placed[{"R", "M", "MBip", "N", "N+C", "SF", "SW"}, Top], 
+ ChartStyle -> Drop[colors, {3}], Frame -> True]
